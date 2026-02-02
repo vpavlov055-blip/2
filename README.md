@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(name)
 
-TOKEN = "8041224774:AAFbMkyiMjHErVHcuqaHp4v8r2T0jPD7Eo4"
+TOKEN = ""
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB для бесплатных пользователей
 MAX_PREMIUM_SIZE = 100 * 1024 * 1024  # 100MB для премиум
 ADMIN_ID = 000000000  # Ваш ID в Telegram
