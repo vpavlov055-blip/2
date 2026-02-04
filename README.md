@@ -142,7 +142,7 @@ def convert_docx_to_txt_python_docx(input_path, output_path):
     except:
         return False
 
-print("Бот запущен...")
+print("да")
 last_id = 0
 user_states = {}
 
