@@ -3,6 +3,8 @@ import json
 import time
 import os
 import tempfile
+import mimetypes
+from PIL import Image
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 URL = f"https://api.telegram.org/bot{TOKEN}/"
@@ -30,23 +32,24 @@ def send_message(chat_id, text, reply_markup=None):
 def send_document(chat_id, filepath):
     try:
         import requests
-        files = {'document': open(filepath, 'rb')}
-        data = {'chat_id': chat_id}
-        response = requests.post(
-            f'https://api.telegram.org/bot{TOKEN}/sendDocument',
-            files=files,
-            data=data
-        )
-        files['document'].close()
+        with open(filepath, 'rb') as f:
+            files = {'document': (os.path.basename(filepath), f)}
+            data = {'chat_id': chat_id}
+            response = requests.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
+                files=files,
+                data=data
+            )
         return response.status_code == 200
     except:
         try:
-            import mimetypes
-            boundary = '----WebKitFormBoundary' + ''.join([str(i) for i in range(10)])
-            headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
             with open(filepath, 'rb') as f:
                 file_content = f.read()
             filename = os.path.basename(filepath)
+            
+            boundary = '----WebKitFormBoundary' + ''.join([str(i) for i in range(10)])
+            headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+            
             body = (
                 f'--{boundary}\r\n'
                 f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
@@ -55,6 +58,7 @@ def send_document(chat_id, filepath):
                 f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'
                 f'Content-Type: application/octet-stream\r\n\r\n'
             ).encode() + file_content + f'\r\n--{boundary}--\r\n'.encode()
+            
             req = urllib.request.Request(
                 f'https://api.telegram.org/bot{TOKEN}/sendDocument',
                 data=body,
@@ -122,13 +126,21 @@ def convert_txt_to_pdf_fpdf(input_path, output_path):
         except:
             return False
 
-def convert_image_pil(input_path, output_path):
+def convert_image_pil(input_path, output_path, target_format):
     try:
-        from PIL import Image
         with Image.open(input_path) as img:
-            img.save(output_path)
-        return True
-    except:
+            if img.mode in ('RGBA', 'LA') and target_format == 'JPEG':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'RGBA':
+                    background.paste(img, mask=img.split()[3])
+                else:
+                    background.paste(img, mask=img.split()[1])
+                img = background
+            
+            img.save(output_path, target_format)
+            return True
+    except Exception as e:
+        print(f"Ошибка конвертации изображения: {e}")
         return False
 
 def convert_docx_to_txt_python_docx(input_path, output_path):
@@ -139,6 +151,21 @@ def convert_docx_to_txt_python_docx(input_path, output_path):
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(text)
         return True
+    except:
+        return False
+
+def send_photo(chat_id, photo_path):
+    try:
+        import requests
+        with open(photo_path, 'rb') as f:
+            files = {'photo': f}
+            data = {'chat_id': chat_id}
+            response = requests.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendPhoto',
+                files=files,
+                data=data
+            )
+        return response.status_code == 200
     except:
         return False
 
@@ -202,6 +229,40 @@ while True:
                         send_message(chat_id, welcome_text, get_conversion_keyboard())
                         user_states[chat_id] = "main"
                     
+                    elif "photo" in msg:
+                        photos = msg["photo"]
+                        if photos:
+                            largest_photo = photos[-1]
+                            send_message(chat_id, f"Получено изображение")
+                            
+                            with tempfile.TemporaryDirectory() as tmp_dir:
+                                input_path = os.path.join(tmp_dir, "photo.jpg")
+                                
+                                if download_file(largest_photo["file_id"], input_path):
+                                    state = user_states.get(chat_id, "")
+                                    result = False
+                                    
+                                    if state == "convert_jpg_png":
+                                        output_path = os.path.join(tmp_dir, "converted.png")
+                                        result = convert_image_pil(input_path, output_path, 'PNG')
+                                    elif state == "convert_png_jpg":
+                                        output_path = os.path.join(tmp_dir, "converted.jpg")
+                                        result = convert_image_pil(input_path, output_path, 'JPEG')
+                                    
+                                    if result:
+                                        if send_document(chat_id, output_path):
+                                            send_message(chat_id, "Конвертация завершена")
+                                        else:
+                                            send_message(chat_id, "Ошибка отправки файла")
+                                    else:
+                                        send_message(chat_id, "Ошибка конвертации")
+                                    
+                                    send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
+                                    user_states[chat_id] = "main"
+                                
+                                else:
+                                    send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
+                    
                     elif "document" in msg:
                         doc = msg["document"]
                         filename = doc.get("file_name", "file")
@@ -222,7 +283,7 @@ while True:
                                 
                                 elif state == "convert_jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
                                     output_path = os.path.join(tmp_dir, base_name + ".png")
-                                    result = convert_image_pil(input_path, output_path)
+                                    result = convert_image_pil(input_path, output_path, 'PNG')
                                 
                                 elif state == "convert_docx_txt" and filename.lower().endswith('.docx'):
                                     output_path = os.path.join(tmp_dir, base_name + ".txt")
@@ -230,7 +291,7 @@ while True:
                                 
                                 elif state == "convert_png_jpg" and filename.lower().endswith('.png'):
                                     output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    result = convert_image_pil(input_path, output_path)
+                                    result = convert_image_pil(input_path, output_path, 'JPEG')
                                 
                                 if result:
                                     if send_document(chat_id, output_path):
