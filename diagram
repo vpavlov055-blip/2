@@ -13,7 +13,8 @@ except ImportError:
     PYTESSERACT_AVAILABLE = False
 
 try:
-    import pyheif
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
     PYHEIF_AVAILABLE = True
 except ImportError:
     PYHEIF_AVAILABLE = False
@@ -27,7 +28,7 @@ def make_request(method, data=None):
     try:
         if data:
             data = json.dumps(data).encode()
-            req = urllib.request.Request(URL + method, data=data, 
+            req = urllib.request.Request(URL + method, data=data,
                                        headers={'Content-Type': 'application/json'})
         else:
             req = urllib.request.Request(URL + method)
