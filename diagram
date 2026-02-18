@@ -5,7 +5,8 @@ import os
 import tempfile
 from PIL import Image
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+# ВАЖНО: ВСТАВЬТЕ СВОЙ ТОКЕН
+TOKEN = "7087712260:AAHxJ_K_JjXhdh2VgO8HQHXv2nLzOIdXf68"  # Ваш токен
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 # Хранение ID сообщений для удаления
@@ -120,7 +121,6 @@ def download_file(file_id, filename):
     return False
 
 def convert_txt_to_pdf(input_path, output_path):
-    """Простая конвертация TXT в PDF"""
     try:
         from fpdf import FPDF
         pdf = FPDF()
@@ -131,10 +131,6 @@ def convert_txt_to_pdf(input_path, output_path):
             for line in f:
                 line = line.strip()
                 if line:
-                    # Обработка длинных строк
-                    while len(line) > 80:
-                        pdf.cell(200, 10, txt=line[:80], ln=1)
-                        line = line[80:]
                     pdf.cell(200, 10, txt=line, ln=1)
         
         pdf.output(output_path)
@@ -175,88 +171,79 @@ def convert_docx_to_txt(input_path, output_path):
         print(f"Ошибка DOCX->TXT: {e}")
         return False
 
-def convert_pdf_to_docx_simple(input_path, output_path):
-    """Упрощенная конвертация PDF в DOCX через извлечение текста"""
+def convert_pdf_to_docx(input_path, output_path):
+    """Конвертация PDF в DOCX"""
+    print("=" * 50)
+    print("НАЧАЛО КОНВЕРТАЦИИ PDF → DOCX")
+    print("=" * 50)
+    
     try:
-        print(f"Начинаем конвертацию PDF в DOCX")
-        print(f"Входной файл: {input_path}")
-        
-        # Проверяем существование файла
+        # Проверяем входной файл
         if not os.path.exists(input_path):
-            print(f"Файл не найден: {input_path}")
+            print(f"❌ Входной файл не существует: {input_path}")
             return False
         
         file_size = os.path.getsize(input_path)
-        print(f"Размер файла: {file_size} байт")
+        print(f"📄 Размер PDF: {file_size} байт")
         
         if file_size == 0:
-            print("Файл пустой")
+            print("❌ Файл пустой")
             return False
         
-        # Пробуем импортировать библиотеки
-        try:
-            import PyPDF2
-            from docx import Document
-            print("Библиотеки успешно импортированы")
-        except ImportError as e:
-            print(f"Ошибка импорта библиотек: {e}")
-            return False
+        # Импортируем библиотеки
+        import PyPDF2
+        from docx import Document
+        print("✅ Библиотеки импортированы")
         
         # Читаем PDF
+        print("📖 Читаем PDF...")
         text = ""
-        try:
-            with open(input_path, 'rb') as file:
-                reader = PyPDF2.PdfReader(file)
-                num_pages = len(reader.pages)
-                print(f"Количество страниц: {num_pages}")
-                
-                for page_num in range(num_pages):
-                    page = reader.pages[page_num]
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n\n"
-                        print(f"Страница {page_num + 1}: извлечено {len(page_text)} символов")
-                    else:
-                        print(f"Страница {page_num + 1}: текст не извлечен")
-        except Exception as e:
-            print(f"Ошибка чтения PDF: {e}")
-            return False
+        with open(input_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            pages = len(reader.pages)
+            print(f"📑 Всего страниц: {pages}")
+            
+            for i in range(pages):
+                page = reader.pages[i]
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n\n"
+                    print(f"   Страница {i+1}: {len(page_text)} символов")
+                else:
+                    print(f"   Страница {i+1}: нет текста")
         
         if not text.strip():
-            print("Не удалось извлечь текст из PDF")
+            print("❌ Не удалось извлечь текст из PDF")
             return False
         
-        print(f"Всего извлечено текста: {len(text)} символов")
+        print(f"✅ Извлечено текста: {len(text)} символов")
         
         # Создаем DOCX
-        try:
-            doc = Document()
-            doc.add_heading('Извлеченный текст из PDF', 0)
-            
-            # Разбиваем текст на абзацы
-            paragraphs = text.split('\n')
-            for para in paragraphs:
-                if para.strip():
-                    doc.add_paragraph(para.strip())
-            
-            doc.save(output_path)
-            print(f"DOCX сохранен: {output_path}")
-            
-            # Проверяем результат
-            if os.path.exists(output_path):
-                out_size = os.path.getsize(output_path)
-                print(f"Размер DOCX: {out_size} байт")
-                return out_size > 0
-            else:
-                print("DOCX файл не создан")
-                return False
-                
-        except Exception as e:
-            print(f"Ошибка создания DOCX: {e}")
+        print("📝 Создаем DOCX...")
+        doc = Document()
+        doc.add_heading('Извлеченный текст из PDF', 0)
+        
+        # Добавляем текст по абзацам
+        for line in text.split('\n'):
+            if line.strip():
+                doc.add_paragraph(line.strip())
+        
+        doc.save(output_path)
+        print(f"✅ DOCX создан: {output_path}")
+        
+        # Проверяем результат
+        if os.path.exists(output_path):
+            out_size = os.path.getsize(output_path)
+            print(f"📊 Размер DOCX: {out_size} байт")
+            return out_size > 0
+        else:
+            print("❌ DOCX файл не создан")
             return False
             
     except Exception as e:
-        print(f"Общая ошибка конвертации: {e}")
+        print(f"❌ Ошибка: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def convert_pdf_to_txt(input_path, output_path):
@@ -297,28 +284,28 @@ while True:
                     
                     if data == "txt_pdf":
                         send_message(chat_id, "Отправьте текстовый файл (.txt)", get_back_button())
-                        user_states[chat_id] = "convert_txt_pdf"
+                        user_states[chat_id] = "txt_pdf"
                     
                     elif data == "jpg_png":
                         send_message(chat_id, "Отправьте JPG изображение", get_back_button())
-                        user_states[chat_id] = "convert_jpg_png"
+                        user_states[chat_id] = "jpg_png"
                     
                     elif data == "docx_txt":
                         send_message(chat_id, "Отправьте документ Word (.docx)", get_back_button())
-                        user_states[chat_id] = "convert_docx_txt"
+                        user_states[chat_id] = "docx_txt"
                     
                     elif data == "png_jpg":
                         send_message(chat_id, "Отправьте PNG изображение", get_back_button())
-                        user_states[chat_id] = "convert_png_jpg"
+                        user_states[chat_id] = "png_jpg"
                     
                     elif data == "pdf_docx":
                         send_message(chat_id, "Отправьте PDF файл", get_back_button())
-                        user_states[chat_id] = "convert_pdf_docx"
+                        user_states[chat_id] = "pdf_docx"
                         print(f"Установлено состояние PDF->DOCX для {chat_id}")
                     
                     elif data == "pdf_txt":
                         send_message(chat_id, "Отправьте PDF файл", get_back_button())
-                        user_states[chat_id] = "convert_pdf_txt"
+                        user_states[chat_id] = "pdf_txt"
                     
                     elif data == "back":
                         send_message(chat_id, "Выберите тип конвертации:", get_conversion_keyboard())
@@ -348,8 +335,8 @@ while True:
                         doc = msg["document"]
                         filename = doc.get("file_name", "file")
                         
-                        print(f"Получен файл: {filename}")
-                        print(f"Состояние: {user_states.get(chat_id)}")
+                        print(f"\n📥 Получен файл: {filename}")
+                        print(f"📊 Состояние: {user_states.get(chat_id)}")
                         
                         send_message(chat_id, f"Получен файл: {filename}")
                         
@@ -359,56 +346,55 @@ while True:
                             if download_file(doc["file_id"], input_path):
                                 state = user_states.get(chat_id, "")
                                 base_name = os.path.splitext(filename)[0]
-                                print(f"Base name: {base_name}")
                                 
                                 result = False
                                 output_path = None
                                 
-                                if state == "convert_txt_pdf" and filename.lower().endswith('.txt'):
+                                if state == "txt_pdf" and filename.lower().endswith('.txt'):
                                     output_path = os.path.join(tmp_dir, base_name + ".pdf")
-                                    print(f"Конвертация TXT->PDF")
+                                    print("🔄 Конвертация TXT->PDF")
                                     result = convert_txt_to_pdf(input_path, output_path)
                                 
-                                elif state == "convert_jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
+                                elif state == "jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
                                     output_path = os.path.join(tmp_dir, base_name + ".png")
-                                    print(f"Конвертация JPG->PNG")
+                                    print("🔄 Конвертация JPG->PNG")
                                     result = convert_image(input_path, output_path, 'PNG')
                                 
-                                elif state == "convert_docx_txt" and filename.lower().endswith('.docx'):
+                                elif state == "docx_txt" and filename.lower().endswith('.docx'):
                                     output_path = os.path.join(tmp_dir, base_name + ".txt")
-                                    print(f"Конвертация DOCX->TXT")
+                                    print("🔄 Конвертация DOCX->TXT")
                                     result = convert_docx_to_txt(input_path, output_path)
                                 
-                                elif state == "convert_png_jpg" and filename.lower().endswith('.png'):
+                                elif state == "png_jpg" and filename.lower().endswith('.png'):
                                     output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    print(f"Конвертация PNG->JPG")
+                                    print("🔄 Конвертация PNG->JPG")
                                     result = convert_image(input_path, output_path, 'JPEG')
                                 
-                                elif state == "convert_pdf_docx" and filename.lower().endswith('.pdf'):
+                                elif state == "pdf_docx" and filename.lower().endswith('.pdf'):
                                     output_path = os.path.join(tmp_dir, base_name + ".docx")
-                                    print(f"Конвертация PDF->DOCX")
-                                    result = convert_pdf_to_docx_simple(input_path, output_path)
+                                    print("🔄 Конвертация PDF->DOCX")
+                                    result = convert_pdf_to_docx(input_path, output_path)
                                 
-                                elif state == "convert_pdf_txt" and filename.lower().endswith('.pdf'):
+                                elif state == "pdf_txt" and filename.lower().endswith('.pdf'):
                                     output_path = os.path.join(tmp_dir, base_name + ".txt")
-                                    print(f"Конвертация PDF->TXT")
+                                    print("🔄 Конвертация PDF->TXT")
                                     result = convert_pdf_to_txt(input_path, output_path)
                                 
-                                print(f"Результат конвертации: {result}")
+                                print(f"📊 Результат конвертации: {result}")
                                 
                                 if result and output_path and os.path.exists(output_path):
                                     if send_document(chat_id, output_path):
-                                        send_message(chat_id, "Конвертация завершена")
+                                        send_message(chat_id, "✅ Конвертация завершена")
                                     else:
-                                        send_message(chat_id, "Ошибка отправки файла")
+                                        send_message(chat_id, "❌ Ошибка отправки файла")
                                 else:
-                                    send_message(chat_id, "Ошибка конвертации")
+                                    send_message(chat_id, "❌ Ошибка конвертации")
                                 
                                 send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
                                 user_states[chat_id] = "main"
                             
                             else:
-                                send_message(chat_id, "Ошибка загрузки файла", get_conversion_keyboard())
+                                send_message(chat_id, "❌ Ошибка загрузки файла", get_conversion_keyboard())
         
     except Exception as e:
         print(f"Ошибка в основном цикле: {e}")
