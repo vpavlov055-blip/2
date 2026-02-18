@@ -305,6 +305,7 @@ while True:
                     chat_id = msg.get("chat", {}).get("id")
                     text = msg.get("text", "")
                     message_id = msg.get("message_id")
+                    first_name = msg.get("chat", {}).get("first_name", "")  # ИСПРАВЛЕНО: добавил получение first_name
                     
                     if not chat_id:
                         continue
