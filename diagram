@@ -19,7 +19,7 @@ try:
 except ImportError:
     PYHEIF_AVAILABLE = False
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8041224774:AAFbMkyiMjHErVHcuqaHp4v8r2T0jPD7Eo4")
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 last_converted_files = {}
