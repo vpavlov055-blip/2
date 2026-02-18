@@ -1,1 +1,550 @@
+import urllib.request
+import json
+import time
+import os
+import tempfile
+import mimetypes
+from PIL import Image
+import subprocess
+import sys
 
+# Проверка наличия необходимых библиотек
+try:
+    import pytesseract
+    from pdf2image import convert_from_path
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
+
+try:
+    import pyheif
+    PYHEIF_AVAILABLE = True
+except ImportError:
+    PYHEIF_AVAILABLE = False
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+URL = f"https://api.telegram.org/bot{TOKEN}/"
+
+# Хранилище последних конвертированных файлов для каждого пользователя
+last_converted_files = {}
+
+def make_request(method, data=None):
+    try:
+        if data:
+            data = json.dumps(data).encode()
+            req = urllib.request.Request(URL + method, data=data, 
+                                       headers={'Content-Type': 'application/json'})
+        else:
+            req = urllib.request.Request(URL + method)
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.load(response)
+    except:
+        return {"ok": False}
+
+def send_message(chat_id, text, reply_markup=None):
+    data = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+    make_request("sendMessage", data)
+
+def send_document(chat_id, filepath):
+    try:
+        import requests
+        with open(filepath, 'rb') as f:
+            files = {'document': (os.path.basename(filepath), f)}
+            data = {'chat_id': chat_id}
+            response = requests.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
+                files=files,
+                data=data
+            )
+        return response.status_code == 200
+    except:
+        try:
+            with open(filepath, 'rb') as f:
+                file_content = f.read()
+            filename = os.path.basename(filepath)
+            
+            boundary = '----WebKitFormBoundary' + ''.join([str(i) for i in range(10)])
+            headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+            
+            body = (
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+                f'{chat_id}\r\n'
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'
+                f'Content-Type: application/octet-stream\r\n\r\n'
+            ).encode() + file_content + f'\r\n--{boundary}--\r\n'.encode()
+            
+            req = urllib.request.Request(
+                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
+                data=body,
+                headers=headers
+            )
+            with urllib.request.urlopen(req) as response:
+                result = json.load(response)
+                return result.get('ok', False)
+        except:
+            return False
+
+def get_conversion_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "TXT → PDF", "callback_data": "txt_pdf"},
+                {"text": "JPG → PNG", "callback_data": "jpg_png"}
+            ],
+            [
+                {"text": "DOCX → TXT", "callback_data": "docx_txt"},
+                {"text": "PNG → JPG", "callback_data": "png_jpg"}
+            ],
+            [
+                {"text": "PDF → DOCX", "callback_data": "pdf_docx"},
+                {"text": "HEIC → JPG", "callback_data": "heic_jpg"}
+            ],
+            [
+                {"text": "HEIC → PNG", "callback_data": "heic_png"}
+            ]
+        ]
+    }
+
+def get_further_conversion_keyboard(file_path, original_format):
+    """Создает клавиатуру для дальнейшей конвертации на основе типа файла"""
+    ext = os.path.splitext(file_path)[1].lower()
+    buttons = []
+    
+    if ext == '.txt':
+        buttons.append([{"text": "TXT → PDF", "callback_data": "convert_again_txt_pdf"}])
+    elif ext == '.pdf':
+        buttons.append([{"text": "PDF → DOCX", "callback_data": "convert_again_pdf_docx"}])
+    elif ext == '.docx':
+        buttons.append([{"text": "DOCX → TXT", "callback_data": "convert_again_docx_txt"}])
+    elif ext in ('.jpg', '.jpeg'):
+        buttons.append([{"text": "JPG → PNG", "callback_data": "convert_again_jpg_png"}])
+    elif ext == '.png':
+        buttons.append([{"text": "PNG → JPG", "callback_data": "convert_again_png_jpg"}])
+    elif ext in ('.heic', '.heif'):
+        buttons.extend([
+            [{"text": "HEIC → JPG", "callback_data": "convert_again_heic_jpg"}],
+            [{"text": "HEIC → PNG", "callback_data": "convert_again_heic_png"}]
+        ])
+    
+    # Добавляем кнопку возврата в главное меню
+    buttons.append([{"text": "🏠 Главное меню", "callback_data": "back"}])
+    
+    return {"inline_keyboard": buttons}
+
+def get_back_button():
+    return {
+        "inline_keyboard": [
+            [{"text": "Назад", "callback_data": "back"}]
+        ]
+    }
+
+def download_file(file_id, filename):
+    file_info = make_request(f"getFile?file_id={file_id}")
+    if file_info.get("ok"):
+        file_path = file_info["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+        urllib.request.urlretrieve(file_url, filename)
+        return True
+    return False
+
+def convert_txt_to_pdf_fpdf(input_path, output_path):
+    try:
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+        pdf.set_font('DejaVu', '', 12)
+        
+        with open(input_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        for line in lines:
+            pdf.cell(200, 10, txt=line.strip(), ln=1)
+        
+        pdf.output(output_path)
+        return True
+    except:
+        try:
+            with open(input_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(f"PDF версия:\n\n{content}")
+            return True
+        except:
+            return False
+
+def convert_image_pil(input_path, output_path, target_format):
+    try:
+        with Image.open(input_path) as img:
+            if img.mode in ('RGBA', 'LA') and target_format == 'JPEG':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'RGBA':
+                    background.paste(img, mask=img.split()[3])
+                else:
+                    background.paste(img, mask=img.split()[1])
+                img = background
+            
+            img.save(output_path, target_format)
+            return True
+    except Exception as e:
+        print(f"Ошибка конвертации изображения: {e}")
+        return False
+
+def convert_heic_to_image(input_path, output_path, target_format):
+    """Конвертация HEIC/HEIF в JPG или PNG"""
+    try:
+        if not PYHEIF_AVAILABLE:
+            print("Библиотека pyheif не установлена")
+            return False
+        
+        heif_file = pyheif.read(input_path)
+        image = Image.frombytes(
+            heif_file.mode, 
+            heif_file.size, 
+            heif_file.data,
+            "raw",
+            heif_file.mode,
+            heif_file.stride,
+        )
+        
+        if image.mode in ('RGBA', 'LA') and target_format == 'JPEG':
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'RGBA':
+                background.paste(image, mask=image.split()[3])
+            else:
+                background.paste(image, mask=image.split()[1])
+            image = background
+        
+        image.save(output_path, target_format)
+        return True
+    except Exception as e:
+        print(f"Ошибка конвертации HEIC: {e}")
+        return False
+
+def convert_docx_to_txt_python_docx(input_path, output_path):
+    try:
+        from docx import Document
+        doc = Document(input_path)
+        text = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(text)
+        return True
+    except:
+        return False
+
+def convert_pdf_to_docx(input_path, output_path):
+    """Конвертация PDF в DOCX с использованием OCR"""
+    try:
+        if not PYTESSERACT_AVAILABLE:
+            print("Библиотеки pytesseract или pdf2image не установлены")
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write("Для конвертации PDF в DOCX необходимы библиотеки:\n")
+                f.write("pip install pytesseract pdf2image pillow\n")
+                f.write("Также требуется установка Tesseract OCR\n")
+            return True
+        
+        images = convert_from_path(input_path)
+        
+        if not images:
+            return False
+        
+        from docx import Document
+        from docx.shared import Inches
+        
+        doc = Document()
+        
+        for i, image in enumerate(images):
+            temp_img = os.path.join(os.path.dirname(output_path), f"temp_page_{i}.jpg")
+            image.save(temp_img, 'JPEG')
+            
+            try:
+                text = pytesseract.image_to_string(temp_img, lang='rus+eng')
+                if text.strip():
+                    doc.add_paragraph(text)
+                else:
+                    doc.add_paragraph(f"[Страница {i+1} - текст не распознан]")
+            except:
+                doc.add_paragraph(f"[Страница {i+1}]")
+            
+            doc.add_picture(temp_img, width=Inches(6))
+            os.unlink(temp_img)
+        
+        doc.save(output_path)
+        return True
+        
+    except Exception as e:
+        print(f"Ошибка конвертации PDF в DOCX: {e}")
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(f"Ошибка конвертации PDF: {str(e)}")
+            return True
+        except:
+            return False
+
+def send_photo(chat_id, photo_path):
+    try:
+        import requests
+        with open(photo_path, 'rb') as f:
+            files = {'photo': f}
+            data = {'chat_id': chat_id}
+            response = requests.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendPhoto',
+                files=files,
+                data=data
+            )
+        return response.status_code == 200
+    except:
+        return False
+
+print("Бот запущен")
+last_id = 0
+user_states = {}
+
+while True:
+    try:
+        updates = make_request(f"getUpdates?offset={last_id+1}&timeout=60")
+        
+        if updates.get("result"):
+            for update in updates["result"]:
+                last_id = update["update_id"]
+                
+                if "callback_query" in update:
+                    query = update["callback_query"]
+                    chat_id = query["message"]["chat"]["id"]
+                    data = query["data"]
+                    message_id = query["message"]["message_id"]
+                    
+                    make_request("editMessageReplyMarkup", {
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "reply_markup": {"inline_keyboard": []}
+                    })
+                    
+                    if data == "txt_pdf":
+                        send_message(chat_id, "TXT → PDF\n\nОтправьте текстовый файл (.txt)", get_back_button())
+                        user_states[chat_id] = "convert_txt_pdf"
+                    
+                    elif data == "jpg_png":
+                        send_message(chat_id, "JPG → PNG\n\nОтправьте JPG изображение", get_back_button())
+                        user_states[chat_id] = "convert_jpg_png"
+                    
+                    elif data == "docx_txt":
+                        send_message(chat_id, "DOCX → TXT\n\nОтправьте документ Word (.docx)", get_back_button())
+                        user_states[chat_id] = "convert_docx_txt"
+                    
+                    elif data == "png_jpg":
+                        send_message(chat_id, "PNG → JPG\n\nОтправьте PNG изображение", get_back_button())
+                        user_states[chat_id] = "convert_png_jpg"
+                    
+                    elif data == "pdf_docx":
+                        send_message(chat_id, "PDF → DOCX\n\nОтправьте PDF файл", get_back_button())
+                        user_states[chat_id] = "convert_pdf_docx"
+                    
+                    elif data == "heic_jpg":
+                        send_message(chat_id, "HEIC → JPG\n\nОтправьте HEIC/HEIF изображение", get_back_button())
+                        user_states[chat_id] = "convert_heic_jpg"
+                    
+                    elif data == "heic_png":
+                        send_message(chat_id, "HEIC → PNG\n\nОтправьте HEIC/HEIF изображение", get_back_button())
+                        user_states[chat_id] = "convert_heic_png"
+                    
+                    elif data == "back":
+                        send_message(chat_id, "Выберите тип конвертации:", get_conversion_keyboard())
+                        user_states[chat_id] = "main"
+                    
+                    # Обработка повторной конвертации
+                    elif data.startswith("convert_again_"):
+                        if chat_id in last_converted_files:
+                            file_info = last_converted_files[chat_id]
+                            file_path = file_info["path"]
+                            
+                            if os.path.exists(file_path):
+                                with tempfile.TemporaryDirectory() as tmp_dir:
+                                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                                    result = False
+                                    output_path = None
+                                    
+                                    if data == "convert_again_txt_pdf":
+                                        output_path = os.path.join(tmp_dir, base_name + ".pdf")
+                                        result = convert_txt_to_pdf_fpdf(file_path, output_path)
+                                    elif data == "convert_again_pdf_docx":
+                                        output_path = os.path.join(tmp_dir, base_name + ".docx")
+                                        result = convert_pdf_to_docx(file_path, output_path)
+                                    elif data == "convert_again_docx_txt":
+                                        output_path = os.path.join(tmp_dir, base_name + ".txt")
+                                        result = convert_docx_to_txt_python_docx(file_path, output_path)
+                                    elif data == "convert_again_jpg_png":
+                                        output_path = os.path.join(tmp_dir, base_name + ".png")
+                                        result = convert_image_pil(file_path, output_path, 'PNG')
+                                    elif data == "convert_again_png_jpg":
+                                        output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                        result = convert_image_pil(file_path, output_path, 'JPEG')
+                                    elif data == "convert_again_heic_jpg":
+                                        output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                        result = convert_heic_to_image(file_path, output_path, 'JPEG')
+                                    elif data == "convert_again_heic_png":
+                                        output_path = os.path.join(tmp_dir, base_name + ".png")
+                                        result = convert_heic_to_image(file_path, output_path, 'PNG')
+                                    
+                                    if result and output_path:
+                                        if send_document(chat_id, output_path):
+                                            send_message(chat_id, "Конвертация завершена")
+                                            
+                                            # Сохраняем новый файл для дальнейшей конвертации
+                                            new_file_path = os.path.join(tempfile.gettempdir(), f"last_{chat_id}_{os.path.basename(output_path)}")
+                                            import shutil
+                                            shutil.copy2(output_path, new_file_path)
+                                            last_converted_files[chat_id] = {
+                                                "path": new_file_path,
+                                                "original_name": os.path.basename(output_path)
+                                            }
+                                            
+                                            # Предлагаем дальнейшую конвертацию
+                                            further_keyboard = get_further_conversion_keyboard(new_file_path, None)
+                                            send_message(chat_id, "Хотите конвертировать этот файл дальше?", further_keyboard)
+                                        else:
+                                            send_message(chat_id, "Ошибка отправки файла")
+                                    else:
+                                        send_message(chat_id, "Ошибка конвертации")
+                            else:
+                                send_message(chat_id, "Файл не найден. Начните новую конвертацию.", get_conversion_keyboard())
+                        else:
+                            send_message(chat_id, "Нет файла для конвертации. Начните новую конвертацию.", get_conversion_keyboard())
+                    
+                    make_request("answerCallbackQuery", {"callback_query_id": query["id"]})
+                
+                elif "message" in update:
+                    msg = update["message"]
+                    chat_id = msg.get("chat", {}).get("id")
+                    text = msg.get("text", "")
+                    first_name = msg.get("chat", {}).get("first_name", "")
+                    
+                    if not chat_id:
+                        continue
+                    
+                    if text == "/start":
+                        welcome_text = f"Привет, {first_name}!\n\nЯ бот для конвертации файлов\n\nВыберите действие:"
+                        send_message(chat_id, welcome_text, get_conversion_keyboard())
+                        user_states[chat_id] = "main"
+                    
+                    elif "photo" in msg:
+                        photos = msg["photo"]
+                        if photos:
+                            largest_photo = photos[-1]
+                            send_message(chat_id, f"Получено изображение")
+                            
+                            with tempfile.TemporaryDirectory() as tmp_dir:
+                                input_path = os.path.join(tmp_dir, "photo.jpg")
+                                
+                                if download_file(largest_photo["file_id"], input_path):
+                                    state = user_states.get(chat_id, "")
+                                    result = False
+                                    output_path = None
+                                    
+                                    if state == "convert_jpg_png":
+                                        output_path = os.path.join(tmp_dir, "converted.png")
+                                        result = convert_image_pil(input_path, output_path, 'PNG')
+                                    elif state == "convert_png_jpg":
+                                        output_path = os.path.join(tmp_dir, "converted.jpg")
+                                        result = convert_image_pil(input_path, output_path, 'JPEG')
+                                    
+                                    if result and output_path:
+                                        if send_document(chat_id, output_path):
+                                            send_message(chat_id, "Конвертация завершена")
+                                            
+                                            # Сохраняем файл для дальнейшей конвертации
+                                            saved_path = os.path.join(tempfile.gettempdir(), f"last_{chat_id}_{os.path.basename(output_path)}")
+                                            import shutil
+                                            shutil.copy2(output_path, saved_path)
+                                            last_converted_files[chat_id] = {
+                                                "path": saved_path,
+                                                "original_name": os.path.basename(output_path)
+                                            }
+                                            
+                                            # Предлагаем дальнейшую конвертацию
+                                            further_keyboard = get_further_conversion_keyboard(saved_path, None)
+                                            send_message(chat_id, "Хотите конвертировать этот файл дальше?", further_keyboard)
+                                        else:
+                                            send_message(chat_id, "Ошибка отправки файла")
+                                    else:
+                                        send_message(chat_id, "Ошибка конвертации", get_conversion_keyboard())
+                                        user_states[chat_id] = "main"
+                                else:
+                                    send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
+                    
+                    elif "document" in msg:
+                        doc = msg["document"]
+                        filename = doc.get("file_name", "file")
+                        
+                        send_message(chat_id, f"Получен файл: {filename}")
+                        
+                        with tempfile.TemporaryDirectory() as tmp_dir:
+                            input_path = os.path.join(tmp_dir, filename)
+                            
+                            if download_file(doc["file_id"], input_path):
+                                state = user_states.get(chat_id, "")
+                                base_name = os.path.splitext(filename)[0]
+                                file_ext = os.path.splitext(filename)[1].lower()
+                                result = False
+                                output_path = None
+                                
+                                if state == "convert_txt_pdf" and file_ext == '.txt':
+                                    output_path = os.path.join(tmp_dir, base_name + ".pdf")
+                                    result = convert_txt_to_pdf_fpdf(input_path, output_path)
+                                
+                                elif state == "convert_jpg_png" and file_ext in ('.jpg', '.jpeg'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".png")
+                                    result = convert_image_pil(input_path, output_path, 'PNG')
+                                
+                                elif state == "convert_docx_txt" and file_ext == '.docx':
+                                    output_path = os.path.join(tmp_dir, base_name + ".txt")
+                                    result = convert_docx_to_txt_python_docx(input_path, output_path)
+                                
+                                elif state == "convert_png_jpg" and file_ext == '.png':
+                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                    result = convert_image_pil(input_path, output_path, 'JPEG')
+                                
+                                elif state == "convert_pdf_docx" and file_ext == '.pdf':
+                                    output_path = os.path.join(tmp_dir, base_name + ".docx")
+                                    result = convert_pdf_to_docx(input_path, output_path)
+                                
+                                elif state == "convert_heic_jpg" and file_ext in ('.heic', '.heif'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                    result = convert_heic_to_image(input_path, output_path, 'JPEG')
+                                
+                                elif state == "convert_heic_png" and file_ext in ('.heic', '.heif'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".png")
+                                    result = convert_heic_to_image(input_path, output_path, 'PNG')
+                                
+                                if result and output_path:
+                                    if send_document(chat_id, output_path):
+                                        send_message(chat_id, "Конвертация завершена")
+                                        
+                                        # Сохраняем файл для дальнейшей конвертации
+                                        saved_path = os.path.join(tempfile.gettempdir(), f"last_{chat_id}_{os.path.basename(output_path)}")
+                                        import shutil
+                                        shutil.copy2(output_path, saved_path)
+                                        last_converted_files[chat_id] = {
+                                            "path": saved_path,
+                                            "original_name": os.path.basename(output_path)
+                                        }
+                                        
+                                        # Предлагаем дальнейшую конвертацию
+                                        further_keyboard = get_further_conversion_keyboard(saved_path, file_ext)
+                                        send_message(chat_id, "Хотите конвертировать этот файл дальше?", further_keyboard)
+                                    else:
+                                        send_message(chat_id, "Ошибка отправки файла")
+                                else:
+                                    send_message(chat_id, "Ошибка конвертации", get_conversion_keyboard())
+                                    user_states[chat_id] = "main"
+                            else:
+                                send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
+        
+    except Exception as e:
+        print(f"Ошибка: {e}")
+        time.sleep(5)
