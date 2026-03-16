@@ -216,6 +216,31 @@ def convert_docx_to_pdf(input_path, output_path):
         print(f"Ошибка DOCX to PDF: {e}")
         return False
 
+def convert_gif_to_mp4(input_path, output_path):
+    try:
+        print(f"Конвертация GIF в MP4: {input_path}")
+        from PIL import Image, ImageSequence
+        import imageio
+        import numpy as np
+        import os
+        
+        frames = []
+        with Image.open(input_path) as img:
+            for frame in ImageSequence.Iterator(img):
+                frame_rgb = frame.convert('RGB')
+                frames.append(np.array(frame_rgb))
+        
+        if frames:
+            imageio.mimsave(output_path, frames, fps=10)
+            
+            if os.path.exists(output_path):
+                print(f"MP4 создан, размер: {os.path.getsize(output_path)}")
+                return True
+        return False
+    except Exception as e:
+        print(f"Ошибка GIF to MP4: {e}")
+        return False
+
 def convert_webp_to_png(input_path, output_path):
     try:
         print(f"Конвертация WEBP в PNG: {input_path}")
