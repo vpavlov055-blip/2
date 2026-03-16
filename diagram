@@ -406,8 +406,11 @@ while True:
                                     result = convert_docx_to_pdf(input_path, output_path)
                                 
                                 elif state == "convert_gif_mp4" and filename.lower().endswith('.gif'):
+                                    print(f"Обработка GIF файла: {filename}")
+                                    print(f"Размер файла: {os.path.getsize(input_path)} байт")
                                     output_path = os.path.join(tmp_dir, base_name + ".mp4")
                                     result = convert_gif_to_mp4(input_path, output_path)
+                                    print(f"Результат конвертации GIF: {result}")
                                 
                                 elif state == "convert_webp_png" and filename.lower().endswith('.webp'):
                                     output_path = os.path.join(tmp_dir, base_name + ".png")
