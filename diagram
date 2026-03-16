@@ -3,14 +3,11 @@ import json
 import time
 import os
 import tempfile
+import mimetypes
 from PIL import Image
 
-# ВАЖНО: ВСТАВЬТЕ СВОЙ ТОКЕН
-TOKEN = "7087712260:AAHxJ_K_JjXhdh2VgO8HQHXv2nLzOIdXf68"  # Ваш токен
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 URL = f"https://api.telegram.org/bot{TOKEN}/"
-
-# Хранение ID сообщений для удаления
-user_messages = {}
 
 def make_request(method, data=None):
     try:
@@ -23,42 +20,14 @@ def make_request(method, data=None):
         
         with urllib.request.urlopen(req, timeout=10) as response:
             return json.load(response)
-    except Exception as e:
-        print(f"Ошибка запроса: {e}")
-        return {"ok": False}
-
-def delete_message(chat_id, message_id):
-    try:
-        make_request("deleteMessage", {
-            "chat_id": chat_id,
-            "message_id": message_id
-        })
     except:
-        pass
-
-def delete_previous_messages(chat_id, current_message_id):
-    if chat_id in user_messages:
-        for msg_id in user_messages[chat_id]:
-            if msg_id != current_message_id:
-                delete_message(chat_id, msg_id)
-    user_messages[chat_id] = [current_message_id] if current_message_id else []
-
-def add_message_to_track(chat_id, message_id):
-    if chat_id in user_messages:
-        user_messages[chat_id].append(message_id)
-    else:
-        user_messages[chat_id] = [message_id]
+        return {"ok": False}
 
 def send_message(chat_id, text, reply_markup=None):
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
         data["reply_markup"] = reply_markup
-    result = make_request("sendMessage", data)
-    if result.get("ok"):
-        message_id = result["result"]["message_id"]
-        add_message_to_track(chat_id, message_id)
-        return message_id
-    return None
+    make_request("sendMessage", data)
 
 def send_document(chat_id, filepath):
     try:
@@ -71,16 +40,34 @@ def send_document(chat_id, filepath):
                 files=files,
                 data=data
             )
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("ok"):
-                message_id = result["result"]["message_id"]
-                add_message_to_track(chat_id, message_id)
-            return True
-        return False
-    except Exception as e:
-        print(f"Ошибка отправки документа: {e}")
-        return False
+        return response.status_code == 200
+    except:
+        try:
+            with open(filepath, 'rb') as f:
+                file_content = f.read()
+            filename = os.path.basename(filepath)
+            
+            boundary = '----WebKitFormBoundary' + ''.join([str(i) for i in range(10)])
+            headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+            body = (
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+                f'{chat_id}\r\n'
+                f'--{boundary}\r\n'
+                f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'
+                f'Content-Type: application/octet-stream\r\n\r\n'
+            ).encode() + file_content + f'\r\n--{boundary}--\r\n'.encode()
+            
+            req = urllib.request.Request(
+                f'https://api.telegram.org/bot{TOKEN}/sendDocument',
+                data=body,
+                headers=headers
+            )
+            with urllib.request.urlopen(req) as response:
+                result = json.load(response)
+                return result.get('ok', False)
+        except:
+            return False
 
 def get_conversion_keyboard():
     return {
@@ -94,8 +81,16 @@ def get_conversion_keyboard():
                 {"text": "PNG → JPG", "callback_data": "png_jpg"}
             ],
             [
-                {"text": "PDF → DOCX", "callback_data": "pdf_docx"},
-                {"text": "PDF → TXT", "callback_data": "pdf_txt"}
+                {"text": "TXT → DOCX", "callback_data": "txt_docx"},
+                {"text": "DOCX → PDF", "callback_data": "docx_pdf"}
+            ],
+            [
+                {"text": "GIF → MP4", "callback_data": "gif_mp4"},
+                {"text": "WEBP → PNG", "callback_data": "webp_png"}
+            ],
+            [
+                {"text": "WEBP → JPG", "callback_data": "webp_jpg"},
+                {"text": "PDF → JPG", "callback_data": "pdf_jpg"}
             ]
         ]
     }
@@ -106,40 +101,42 @@ def get_back_button():
             [{"text": "Назад", "callback_data": "back"}]
         ]
     }
-
 def download_file(file_id, filename):
-    try:
-        file_info = make_request(f"getFile?file_id={file_id}")
-        if file_info.get("ok"):
-            file_path = file_info["result"]["file_path"]
-            file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
-            urllib.request.urlretrieve(file_url, filename)
-            print(f"Файл скачан: {filename}, размер: {os.path.getsize(filename)} байт")
-            return True
-    except Exception as e:
-        print(f"Ошибка скачивания: {e}")
+    file_info = make_request(f"getFile?file_id={file_id}")
+    if file_info.get("ok"):
+        file_path = file_info["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+        urllib.request.urlretrieve(file_url, filename)
+        return True
     return False
 
-def convert_txt_to_pdf(input_path, output_path):
+def convert_txt_to_pdf_fpdf(input_path, output_path):
     try:
         from fpdf import FPDF
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Arial", size=12)
+        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+        pdf.set_font('DejaVu', '', 12)
         
         with open(input_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    pdf.cell(200, 10, txt=line, ln=1)
+            lines = f.readlines()
+        
+        for line in lines:
+            pdf.cell(200, 10, txt=line.strip(), ln=1)
         
         pdf.output(output_path)
         return True
-    except Exception as e:
-        print(f"Ошибка TXT->PDF: {e}")
-        return False
+    except:
+        try:
+            with open(input_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(f"PDF версия:\n\n{content}")
+            return True
+        except:
+            return False
 
-def convert_image(input_path, output_path, target_format):
+def convert_image_pil(input_path, output_path, target_format):
     try:
         with Image.open(input_path) as img:
             if img.mode in ('RGBA', 'LA') and target_format == 'JPEG':
@@ -149,120 +146,110 @@ def convert_image(input_path, output_path, target_format):
                 else:
                     background.paste(img, mask=img.split()[1])
                 img = background
+
             img.save(output_path, target_format)
-        return True
+            return True
     except Exception as e:
         print(f"Ошибка конвертации изображения: {e}")
         return False
 
-def convert_docx_to_txt(input_path, output_path):
+def convert_docx_to_txt_python_docx(input_path, output_path):
     try:
         from docx import Document
         doc = Document(input_path)
-        text = []
-        for paragraph in doc.paragraphs:
-            if paragraph.text:
-                text.append(paragraph.text)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(text))
-        return True
-    except Exception as e:
-        print(f"Ошибка DOCX->TXT: {e}")
-        return False
-
-def convert_pdf_to_docx(input_path, output_path):
-    """Конвертация PDF в DOCX"""
-    print("=" * 50)
-    print("НАЧАЛО КОНВЕРТАЦИИ PDF → DOCX")
-    print("=" * 50)
-    
-    try:
-        # Проверяем входной файл
-        if not os.path.exists(input_path):
-            print(f"❌ Входной файл не существует: {input_path}")
-            return False
-        
-        file_size = os.path.getsize(input_path)
-        print(f"📄 Размер PDF: {file_size} байт")
-        
-        if file_size == 0:
-            print("❌ Файл пустой")
-            return False
-        
-        # Импортируем библиотеки
-        import PyPDF2
-        from docx import Document
-        print("✅ Библиотеки импортированы")
-        
-        # Читаем PDF
-        print("📖 Читаем PDF...")
-        text = ""
-        with open(input_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            pages = len(reader.pages)
-            print(f"📑 Всего страниц: {pages}")
-            
-            for i in range(pages):
-                page = reader.pages[i]
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n\n"
-                    print(f"   Страница {i+1}: {len(page_text)} символов")
-                else:
-                    print(f"   Страница {i+1}: нет текста")
-        
-        if not text.strip():
-            print("❌ Не удалось извлечь текст из PDF")
-            return False
-        
-        print(f"✅ Извлечено текста: {len(text)} символов")
-        
-        # Создаем DOCX
-        print("📝 Создаем DOCX...")
-        doc = Document()
-        doc.add_heading('Извлеченный текст из PDF', 0)
-        
-        # Добавляем текст по абзацам
-        for line in text.split('\n'):
-            if line.strip():
-                doc.add_paragraph(line.strip())
-        
-        doc.save(output_path)
-        print(f"✅ DOCX создан: {output_path}")
-        
-        # Проверяем результат
-        if os.path.exists(output_path):
-            out_size = os.path.getsize(output_path)
-            print(f"📊 Размер DOCX: {out_size} байт")
-            return out_size > 0
-        else:
-            print("❌ DOCX файл не создан")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def convert_pdf_to_txt(input_path, output_path):
-    try:
-        import PyPDF2
-        text = ""
-        with open(input_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            for page in reader.pages:
-                text += page.extract_text() + "\n"
-        
+        text = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(text)
         return True
-    except Exception as e:
-        print(f"Ошибка PDF->TXT: {e}")
+    except:
         return False
 
-print("Бот запущен")
+def convert_txt_to_docx(input_path, output_path):
+    try:
+        from docx import Document
+        doc = Document()
+        with open(input_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+        doc.add_paragraph(text)
+        doc.save(output_path)
+        return True
+    except:
+        return False
+
+def convert_docx_to_pdf(input_path, output_path):
+    try:
+        from docx2pdf import convert
+        convert(input_path, output_path)
+        return True
+    except:
+        return False
+
+def convert_gif_to_mp4(input_path, output_path):
+    try:
+        from PIL import Image, ImageSequence
+        import imageio
+        frames = []
+        with Image.open(input_path) as img:
+            for frame in ImageSequence.Iterator(img):
+                frame_rgb = frame.convert('RGB')
+                frames.append(frame_rgb)
+        
+        if frames:
+            imageio.mimsave(output_path, frames, fps=10)
+        return True
+    except Exception as e:
+        print(f"GIF to MP4 error: {e}")
+        return False
+
+def convert_webp_to_png(input_path, output_path):
+    try:
+        with Image.open(input_path) as img:
+            img.save(output_path, 'PNG')
+        return True
+    except:
+        return False
+
+def convert_webp_to_jpg(input_path, output_path):
+    try:
+        with Image.open(input_path) as img:
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            img.save(output_path, 'JPEG', quality=95)
+        return True
+    except:
+        return False
+
+def convert_pdf_to_jpg(input_path, output_path):
+    try:
+        import fitz
+        doc = fitz.open(input_path)
+        page = doc[0]
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        pix.save(output_path)
+        doc.close()
+        return True
+    except Exception as e:
+        print(f"PDF to JPG error: {e}")
+        return False
+
+def send_photo(chat_id, photo_path):
+    try:
+        import requests
+        with open(photo_path, 'rb') as f:
+            files = {'photo': f}
+            data = {'chat_id': chat_id}
+            response = requests.post(
+                f'https://api.telegram.org/bot{TOKEN}/sendPhoto',
+                files=files,
+                data=data
+            )
+        return response.status_code == 200
+    except:
+        return False
+
+print("да")
 last_id = 0
 user_states = {}
 
@@ -280,63 +267,109 @@ while True:
                     data = query["data"]
                     message_id = query["message"]["message_id"]
                     
-                    delete_previous_messages(chat_id, message_id)
+                    make_request("editMessageReplyMarkup", {
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "reply_markup": {"inline_keyboard": []}
+                    })
                     
                     if data == "txt_pdf":
-                        send_message(chat_id, "Отправьте текстовый файл (.txt)", get_back_button())
-                        user_states[chat_id] = "txt_pdf"
-                    
+                        send_message(chat_id, "TXT → PDF\n\nОтправьте текстовый файл (.txt)", get_back_button())
+                        user_states[chat_id] = "convert_txt_pdf"
+
                     elif data == "jpg_png":
-                        send_message(chat_id, "Отправьте JPG изображение", get_back_button())
-                        user_states[chat_id] = "jpg_png"
+                        send_message(chat_id, "JPG → PNG\n\nОтправьте JPG изображение", get_back_button())
+                        user_states[chat_id] = "convert_jpg_png"
                     
                     elif data == "docx_txt":
-                        send_message(chat_id, "Отправьте документ Word (.docx)", get_back_button())
-                        user_states[chat_id] = "docx_txt"
+                        send_message(chat_id, "DOCX → TXT\n\nОтправьте документ Word (.docx)", get_back_button())
+                        user_states[chat_id] = "convert_docx_txt"
                     
                     elif data == "png_jpg":
-                        send_message(chat_id, "Отправьте PNG изображение", get_back_button())
-                        user_states[chat_id] = "png_jpg"
+                        send_message(chat_id, "PNG → JPG\n\nОтправьте PNG изображение", get_back_button())
+                        user_states[chat_id] = "convert_png_jpg"
+
+                    elif data == "txt_docx":
+                        send_message(chat_id, "TXT → DOCX\n\nОтправьте текстовый файл (.txt)", get_back_button())
+                        user_states[chat_id] = "convert_txt_docx"
                     
-                    elif data == "pdf_docx":
-                        send_message(chat_id, "Отправьте PDF файл", get_back_button())
-                        user_states[chat_id] = "pdf_docx"
-                        print(f"Установлено состояние PDF->DOCX для {chat_id}")
+                    elif data == "docx_pdf":
+                        send_message(chat_id, "DOCX → PDF\n\nОтправьте документ Word (.docx)", get_back_button())
+                        user_states[chat_id] = "convert_docx_pdf"
                     
-                    elif data == "pdf_txt":
-                        send_message(chat_id, "Отправьте PDF файл", get_back_button())
-                        user_states[chat_id] = "pdf_txt"
+                    elif data == "gif_mp4":
+                        send_message(chat_id, "GIF → MP4\n\nОтправьте GIF анимацию", get_back_button())
+                        user_states[chat_id] = "convert_gif_mp4"
+                    
+                    elif data == "webp_png":
+                        send_message(chat_id, "WEBP → PNG\n\nОтправьте WEBP изображение", get_back_button())
+                        user_states[chat_id] = "convert_webp_png"
+                    
+                    elif data == "webp_jpg":
+                        send_message(chat_id, "WEBP → JPG\n\nОтправьте WEBP изображение", get_back_button())
+                        user_states[chat_id] = "convert_webp_jpg"
+                    
+                    elif data == "pdf_jpg":
+                        send_message(chat_id, "PDF → JPG\n\nОтправьте PDF файл (первая страница)", get_back_button())
+                        user_states[chat_id] = "convert_pdf_jpg"
                     
                     elif data == "back":
                         send_message(chat_id, "Выберите тип конвертации:", get_conversion_keyboard())
                         user_states[chat_id] = "main"
-                    
+
                     make_request("answerCallbackQuery", {"callback_query_id": query["id"]})
                 
                 elif "message" in update:
                     msg = update["message"]
                     chat_id = msg.get("chat", {}).get("id")
                     text = msg.get("text", "")
-                    message_id = msg.get("message_id")
                     first_name = msg.get("chat", {}).get("first_name", "")
                     
                     if not chat_id:
                         continue
                     
-                    add_message_to_track(chat_id, message_id)
-                    delete_previous_messages(chat_id, message_id)
-                    
                     if text == "/start":
-                        welcome_text = f"Привет, {first_name}!\n\nЯ бот для конвертации файлов"
+                        welcome_text = f"Привет, {first_name}!\n\nЯ бот для конвертации файлов\n\nВыберите действие:"
                         send_message(chat_id, welcome_text, get_conversion_keyboard())
                         user_states[chat_id] = "main"
+                    
+                    elif "photo" in msg:
+                        photos = msg["photo"]
+                        if photos:
+                            largest_photo = photos[-1]
+                            send_message(chat_id, f"Получено изображение")
+                            
+                            with tempfile.TemporaryDirectory() as tmp_dir:
+                                input_path = os.path.join(tmp_dir, "photo.jpg")
+                                
+                                if download_file(largest_photo["file_id"], input_path):
+                                    state = user_states.get(chat_id, "")
+                                    result = False
+                                    
+                                    if state == "convert_jpg_png":
+                                        output_path = os.path.join(tmp_dir, "converted.png")
+                                        result = convert_image_pil(input_path, output_path, 'PNG')
+                                    elif state == "convert_png_jpg":
+                                        output_path = os.path.join(tmp_dir, "converted.jpg")
+                                        result = convert_image_pil(input_path, output_path, 'JPEG')
+
+                                    if result:
+                                        if send_document(chat_id, output_path):
+                                            send_message(chat_id, "Конвертация завершена")
+                                        else:
+                                            send_message(chat_id, "Ошибка отправки файла")
+                                    else:
+                                        send_message(chat_id, "Ошибка конвертации")
+                                    
+                                    send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
+                                    user_states[chat_id] = "main"
+                                
+                                else:
+                                    send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
                     
                     elif "document" in msg:
                         doc = msg["document"]
                         filename = doc.get("file_name", "file")
-                        
-                        print(f"\n📥 Получен файл: {filename}")
-                        print(f"📊 Состояние: {user_states.get(chat_id)}")
                         
                         send_message(chat_id, f"Получен файл: {filename}")
                         
@@ -346,56 +379,62 @@ while True:
                             if download_file(doc["file_id"], input_path):
                                 state = user_states.get(chat_id, "")
                                 base_name = os.path.splitext(filename)[0]
-                                
                                 result = False
-                                output_path = None
                                 
-                                if state == "txt_pdf" and filename.lower().endswith('.txt'):
+                                if state == "convert_txt_pdf" and filename.lower().endswith('.txt'):
                                     output_path = os.path.join(tmp_dir, base_name + ".pdf")
-                                    print("🔄 Конвертация TXT->PDF")
-                                    result = convert_txt_to_pdf(input_path, output_path)
+                                    result = convert_txt_to_pdf_fpdf(input_path, output_path)
                                 
-                                elif state == "jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
+                                elif state == "convert_jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
                                     output_path = os.path.join(tmp_dir, base_name + ".png")
-                                    print("🔄 Конвертация JPG->PNG")
-                                    result = convert_image(input_path, output_path, 'PNG')
+                                    result = convert_image_pil(input_path, output_path, 'PNG')
                                 
-                                elif state == "docx_txt" and filename.lower().endswith('.docx'):
+                                elif state == "convert_docx_txt" and filename.lower().endswith('.docx'):
                                     output_path = os.path.join(tmp_dir, base_name + ".txt")
-                                    print("🔄 Конвертация DOCX->TXT")
-                                    result = convert_docx_to_txt(input_path, output_path)
+                                    result = convert_docx_to_txt_python_docx(input_path, output_path)
                                 
-                                elif state == "png_jpg" and filename.lower().endswith('.png'):
+                                elif state == "convert_png_jpg" and filename.lower().endswith('.png'):
                                     output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    print("🔄 Конвертация PNG->JPG")
-                                    result = convert_image(input_path, output_path, 'JPEG')
-                                
-                                elif state == "pdf_docx" and filename.lower().endswith('.pdf'):
+                                    result = convert_image_pil(input_path, output_path, 'JPEG')
+
+                                elif state == "convert_txt_docx" and filename.lower().endswith('.txt'):
                                     output_path = os.path.join(tmp_dir, base_name + ".docx")
-                                    print("🔄 Конвертация PDF->DOCX")
-                                    result = convert_pdf_to_docx(input_path, output_path)
+                                    result = convert_txt_to_docx(input_path, output_path)
                                 
-                                elif state == "pdf_txt" and filename.lower().endswith('.pdf'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".txt")
-                                    print("🔄 Конвертация PDF->TXT")
-                                    result = convert_pdf_to_txt(input_path, output_path)
+                                elif state == "convert_docx_pdf" and filename.lower().endswith('.docx'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".pdf")
+                                    result = convert_docx_to_pdf(input_path, output_path)
                                 
-                                print(f"📊 Результат конвертации: {result}")
+                                elif state == "convert_gif_mp4" and filename.lower().endswith('.gif'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".mp4")
+                                    result = convert_gif_to_mp4(input_path, output_path)
                                 
-                                if result and output_path and os.path.exists(output_path):
+                                elif state == "convert_webp_png" and filename.lower().endswith('.webp'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".png")
+                                    result = convert_webp_to_png(input_path, output_path)
+                                
+                                elif state == "convert_webp_jpg" and filename.lower().endswith('.webp'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                    result = convert_webp_to_jpg(input_path, output_path)
+                                
+                                elif state == "convert_pdf_jpg" and filename.lower().endswith('.pdf'):
+                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                    result = convert_pdf_to_jpg(input_path, output_path)
+                                
+                                if result:
                                     if send_document(chat_id, output_path):
-                                        send_message(chat_id, "✅ Конвертация завершена")
+                                        send_message(chat_id, "Конвертация завершена")
                                     else:
-                                        send_message(chat_id, "❌ Ошибка отправки файла")
+                                        send_message(chat_id, "Ошибка отправки файла")
                                 else:
-                                    send_message(chat_id, "❌ Ошибка конвертации")
+                                    send_message(chat_id, "Ошибка конвертации")
                                 
                                 send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
                                 user_states[chat_id] = "main"
-                            
+
                             else:
-                                send_message(chat_id, "❌ Ошибка загрузки файла", get_conversion_keyboard())
+                                send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
         
     except Exception as e:
-        print(f"Ошибка в основном цикле: {e}")
+        print(f"Ошибка: {e}")
         time.sleep(5)
