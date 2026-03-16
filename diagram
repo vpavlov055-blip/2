@@ -6,7 +6,7 @@ import tempfile
 import mimetypes
 from PIL import Image
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8041224774:AAFbMkyiMjHErVHcuqaHp4v8r2T0jPD7Eo4")
 URL = f"https://api.telegram.org/bot{TOKEN}/"
 
 def make_request(method, data=None):
@@ -49,6 +49,7 @@ def send_document(chat_id, filepath):
             
             boundary = '----WebKitFormBoundary' + ''.join([str(i) for i in range(10)])
             headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+            
             body = (
                 f'--{boundary}\r\n'
                 f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
@@ -101,6 +102,7 @@ def get_back_button():
             [{"text": "Назад", "callback_data": "back"}]
         ]
     }
+
 def download_file(file_id, filename):
     file_info = make_request(f"getFile?file_id={file_id}")
     if file_info.get("ok"):
@@ -146,7 +148,7 @@ def convert_image_pil(input_path, output_path, target_format):
                 else:
                     background.paste(img, mask=img.split()[1])
                 img = background
-
+            
             img.save(output_path, target_format)
             return True
     except Exception as e:
@@ -166,72 +168,118 @@ def convert_docx_to_txt_python_docx(input_path, output_path):
 
 def convert_txt_to_docx(input_path, output_path):
     try:
+        print(f"Конвертация TXT в DOCX: {input_path}")
         from docx import Document
         doc = Document()
+        
         with open(input_path, 'r', encoding='utf-8') as f:
             text = f.read()
+        
         doc.add_paragraph(text)
         doc.save(output_path)
-        return True
-    except:
+        
+        if os.path.exists(output_path):
+            print(f"DOCX создан, размер: {os.path.getsize(output_path)}")
+            return True
+        return False
+    except Exception as e:
+        print(f"Ошибка TXT to DOCX: {e}")
         return False
 
 def convert_docx_to_pdf(input_path, output_path):
     try:
-        from docx2pdf import convert
-        convert(input_path, output_path)
-        return True
-    except:
-        return False
-
-def convert_gif_to_mp4(input_path, output_path):
-    try:
-        from PIL import Image, ImageSequence
-        import imageio
-        frames = []
-        with Image.open(input_path) as img:
-            for frame in ImageSequence.Iterator(img):
-                frame_rgb = frame.convert('RGB')
-                frames.append(frame_rgb)
+        print(f"Конвертация DOCX в PDF: {input_path}")
+        import os
+        from docx import Document
+        from fpdf import FPDF
         
-        if frames:
-            imageio.mimsave(output_path, frames, fps=10)
-        return True
+        doc = Document(input_path)
+        text = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+        
+        if not text.strip():
+            text = "Пустой документ"
+        
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        
+        for line in text.split('\n'):
+            pdf.cell(200, 10, txt=line.encode('latin-1', 'ignore').decode('latin-1'), ln=1)
+        
+        pdf.output(output_path)
+        
+        if os.path.exists(output_path):
+            print(f"PDF создан, размер: {os.path.getsize(output_path)}")
+            return True
+        return False
     except Exception as e:
-        print(f"GIF to MP4 error: {e}")
+        print(f"Ошибка DOCX to PDF: {e}")
         return False
 
 def convert_webp_to_png(input_path, output_path):
     try:
+        print(f"Конвертация WEBP в PNG: {input_path}")
+        from PIL import Image
+        
         with Image.open(input_path) as img:
             img.save(output_path, 'PNG')
-        return True
-    except:
+        
+        if os.path.exists(output_path):
+            print(f"PNG создан, размер: {os.path.getsize(output_path)}")
+            return True
+        return False
+    except Exception as e:
+        print(f"Ошибка WEBP to PNG: {e}")
         return False
 
 def convert_webp_to_jpg(input_path, output_path):
     try:
+        print(f"Конвертация WEBP в JPG: {input_path}")
+        from PIL import Image
+        
         with Image.open(input_path) as img:
             if img.mode == 'RGBA':
                 background = Image.new('RGB', img.size, (255, 255, 255))
                 background.paste(img, mask=img.split()[3])
                 img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
             img.save(output_path, 'JPEG', quality=95)
-        return True
-    except:
+        
+        if os.path.exists(output_path):
+            print(f"JPG создан, размер: {os.path.getsize(output_path)}")
+            return True
+        return False
+    except Exception as e:
+        print(f"Ошибка WEBP to JPG: {e}")
         return False
 
 def convert_pdf_to_jpg(input_path, output_path):
     try:
-        import fitz
+        print(f"Конвертация PDF в JPG: {input_path}")
+        import fitz  
+        from PIL import Image
+        import io
+        
         doc = fitz.open(input_path)
+        
         page = doc[0]
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-        pix.save(output_path)
+        
+        pix = page.get_pixmap()
+        img_data = pix.tobytes("png")
+        
+        img = Image.open(io.BytesIO(img_data))
+        img.save(output_path, 'JPEG', quality=95)
+        
         doc.close()
-        return True
+        
+        if os.path.exists(output_path):
+            print(f"JPG создан, размер: {os.path.getsize(output_path)}")
+            return True
+        return False
     except Exception as e:
-        print(f"PDF to JPG error: {e}")
+        print(f"Ошибка PDF to JPG: {e}")
         return False
 
 def send_photo(chat_id, photo_path):
@@ -249,110 +297,179 @@ def send_photo(chat_id, photo_path):
     except:
         return False
 
-print("да")
+print("Бот запущен...")
 last_id = 0
 user_states = {}
 
 while True:
-    try:
-        updates = make_request(f"getUpdates?offset={last_id+1}&timeout=60")
+        try:
+            updates = make_request(f"getUpdates?offset={last_id+1}&timeout=60")
         
-        if updates.get("result"):
-            for update in updates["result"]:
-                last_id = update["update_id"]
-                
-                if "callback_query" in update:
-                    query = update["callback_query"]
-                    chat_id = query["message"]["chat"]["id"]
-                    data = query["data"]
-                    message_id = query["message"]["message_id"]
+            if updates.get("result"):
+                for update in updates["result"]:
+                    last_id = update["update_id"]
                     
-                    make_request("editMessageReplyMarkup", {
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "reply_markup": {"inline_keyboard": []}
-                    })
+                    if "callback_query" in update:
+                        query = update["callback_query"]
+                        chat_id = query["message"]["chat"]["id"]
+                        data = query["data"]
+                        message_id = query["message"]["message_id"]
+                        
+                        make_request("editMessageReplyMarkup", {
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "reply_markup": {"inline_keyboard": []}
+                        })
+                        
+                        if data == "txt_pdf":
+                            send_message(chat_id, "TXT → PDF\n\nОтправьте текстовый файл (.txt)", get_back_button())
+                            user_states[chat_id] = "convert_txt_pdf"
+                        
+                        elif data == "jpg_png":
+                            send_message(chat_id, "JPG → PNG\n\nОтправьте JPG изображение", get_back_button())
+                            user_states[chat_id] = "convert_jpg_png"
+                        
+                        elif data == "docx_txt":
+                            send_message(chat_id, "DOCX → TXT\n\nОтправьте документ Word (.docx)", get_back_button())
+                            user_states[chat_id] = "convert_docx_txt"
+                        
+                        elif data == "png_jpg":
+                            send_message(chat_id, "PNG → JPG\n\nОтправьте PNG изображение", get_back_button())
+                            user_states[chat_id] = "convert_png_jpg"
+                        
+                        elif data == "txt_docx":
+                            send_message(chat_id, "TXT → DOCX\n\nОтправьте текстовый файл (.txt)", get_back_button())
+                            user_states[chat_id] = "convert_txt_docx"
+                        
+                        elif data == "docx_pdf":
+                            send_message(chat_id, "DOCX → PDF\n\nОтправьте документ Word (.docx)", get_back_button())
+                            user_states[chat_id] = "convert_docx_pdf"
+                        
+                        elif data == "gif_mp4":
+                            send_message(chat_id, "GIF → MP4\n\nОтправьте GIF анимацию", get_back_button())
+                            user_states[chat_id] = "convert_gif_mp4"
+                        
+                        elif data == "webp_png":
+                            send_message(chat_id, "WEBP → PNG\n\nОтправьте WEBP изображение", get_back_button())
+                            user_states[chat_id] = "convert_webp_png"
+                        
+                        elif data == "webp_jpg":
+                            send_message(chat_id, "WEBP → JPG\n\nОтправьте WEBP изображение", get_back_button())
+                            user_states[chat_id] = "convert_webp_jpg"
+                        
+                        elif data == "pdf_jpg":
+                            send_message(chat_id, "PDF → JPG\n\nОтправьте PDF файл (первая страница)", get_back_button())
+                            user_states[chat_id] = "convert_pdf_jpg"
+                        
+                        elif data == "back":
+                            send_message(chat_id, "Выберите тип конвертации:", get_conversion_keyboard())
+                            user_states[chat_id] = "main"
+                        
+                        make_request("answerCallbackQuery", {"callback_query_id": query["id"]})
                     
-                    if data == "txt_pdf":
-                        send_message(chat_id, "TXT → PDF\n\nОтправьте текстовый файл (.txt)", get_back_button())
-                        user_states[chat_id] = "convert_txt_pdf"
+                    elif "message" in update:
+                        msg = update["message"]
+                        chat_id = msg.get("chat", {}).get("id")
+                        text = msg.get("text", "")
+                        first_name = msg.get("chat", {}).get("first_name", "")
+                        
+                        if not chat_id:
+                            continue
+                        
+                        if text == "/start":
+                            welcome_text = f"Привет, {first_name}!\n\nЯ бот для конвертации файлов\n\nВыберите действие:"
+                            send_message(chat_id, welcome_text, get_conversion_keyboard())
+                            user_states[chat_id] = "main"
+                        
+                        elif "photo" in msg:
+                            photos = msg["photo"]
+                            if photos:
+                                largest_photo = photos[-1]
+                                send_message(chat_id, f"Получено изображение")
+                                
+                                with tempfile.TemporaryDirectory() as tmp_dir:
+                                    input_path = os.path.join(tmp_dir, "photo.jpg")
+                                    
+                                    if download_file(largest_photo["file_id"], input_path):
+                                        state = user_states.get(chat_id, "")
+                                        result = False
+                                        
+                                        if state == "convert_jpg_png":
+                                            output_path = os.path.join(tmp_dir, "converted.png")
+                                            result = convert_image_pil(input_path, output_path, 'PNG')
+                                        elif state == "convert_png_jpg":
+                                            output_path = os.path.join(tmp_dir, "converted.jpg")
+                                            result = convert_image_pil(input_path, output_path, 'JPEG')
+                                        
+                                        if result:
+                                            if send_document(chat_id, output_path):
+                                                send_message(chat_id, "Конвертация завершена")
+                                            else:
+                                                send_message(chat_id, "Ошибка отправки файла")
+                                        else:
+                                            send_message(chat_id, "Ошибка конвертации")
 
-                    elif data == "jpg_png":
-                        send_message(chat_id, "JPG → PNG\n\nОтправьте JPG изображение", get_back_button())
-                        user_states[chat_id] = "convert_jpg_png"
-                    
-                    elif data == "docx_txt":
-                        send_message(chat_id, "DOCX → TXT\n\nОтправьте документ Word (.docx)", get_back_button())
-                        user_states[chat_id] = "convert_docx_txt"
-                    
-                    elif data == "png_jpg":
-                        send_message(chat_id, "PNG → JPG\n\nОтправьте PNG изображение", get_back_button())
-                        user_states[chat_id] = "convert_png_jpg"
-
-                    elif data == "txt_docx":
-                        send_message(chat_id, "TXT → DOCX\n\nОтправьте текстовый файл (.txt)", get_back_button())
-                        user_states[chat_id] = "convert_txt_docx"
-                    
-                    elif data == "docx_pdf":
-                        send_message(chat_id, "DOCX → PDF\n\nОтправьте документ Word (.docx)", get_back_button())
-                        user_states[chat_id] = "convert_docx_pdf"
-                    
-                    elif data == "gif_mp4":
-                        send_message(chat_id, "GIF → MP4\n\nОтправьте GIF анимацию", get_back_button())
-                        user_states[chat_id] = "convert_gif_mp4"
-                    
-                    elif data == "webp_png":
-                        send_message(chat_id, "WEBP → PNG\n\nОтправьте WEBP изображение", get_back_button())
-                        user_states[chat_id] = "convert_webp_png"
-                    
-                    elif data == "webp_jpg":
-                        send_message(chat_id, "WEBP → JPG\n\nОтправьте WEBP изображение", get_back_button())
-                        user_states[chat_id] = "convert_webp_jpg"
-                    
-                    elif data == "pdf_jpg":
-                        send_message(chat_id, "PDF → JPG\n\nОтправьте PDF файл (первая страница)", get_back_button())
-                        user_states[chat_id] = "convert_pdf_jpg"
-                    
-                    elif data == "back":
-                        send_message(chat_id, "Выберите тип конвертации:", get_conversion_keyboard())
-                        user_states[chat_id] = "main"
-
-                    make_request("answerCallbackQuery", {"callback_query_id": query["id"]})
-                
-                elif "message" in update:
-                    msg = update["message"]
-                    chat_id = msg.get("chat", {}).get("id")
-                    text = msg.get("text", "")
-                    first_name = msg.get("chat", {}).get("first_name", "")
-                    
-                    if not chat_id:
-                        continue
-                    
-                    if text == "/start":
-                        welcome_text = f"Привет, {first_name}!\n\nЯ бот для конвертации файлов\n\nВыберите действие:"
-                        send_message(chat_id, welcome_text, get_conversion_keyboard())
-                        user_states[chat_id] = "main"
-                    
-                    elif "photo" in msg:
-                        photos = msg["photo"]
-                        if photos:
-                            largest_photo = photos[-1]
-                            send_message(chat_id, f"Получено изображение")
+                                            send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
+                                        user_states[chat_id] = "main"
+                                    else:
+                                        send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
+                        
+                        elif "document" in msg:
+                            doc = msg["document"]
+                            filename = doc.get("file_name", "file")
+                            
+                            send_message(chat_id, f"Получен файл: {filename}")
                             
                             with tempfile.TemporaryDirectory() as tmp_dir:
-                                input_path = os.path.join(tmp_dir, "photo.jpg")
+                                input_path = os.path.join(tmp_dir, filename)
                                 
-                                if download_file(largest_photo["file_id"], input_path):
+                                if download_file(doc["file_id"], input_path):
                                     state = user_states.get(chat_id, "")
+                                    base_name = os.path.splitext(filename)[0]
                                     result = False
                                     
-                                    if state == "convert_jpg_png":
-                                        output_path = os.path.join(tmp_dir, "converted.png")
+                                    if state == "convert_txt_pdf" and filename.lower().endswith('.txt'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".pdf")
+                                        result = convert_txt_to_pdf_fpdf(input_path, output_path)
+                                    
+                                    elif state == "convert_jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
+                                        output_path = os.path.join(tmp_dir, base_name + ".png")
                                         result = convert_image_pil(input_path, output_path, 'PNG')
-                                    elif state == "convert_png_jpg":
-                                        output_path = os.path.join(tmp_dir, "converted.jpg")
+                                    
+                                    elif state == "convert_docx_txt" and filename.lower().endswith('.docx'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".txt")
+                                        result = convert_docx_to_txt_python_docx(input_path, output_path)
+                                    
+                                    elif state == "convert_png_jpg" and filename.lower().endswith('.png'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".jpg")
                                         result = convert_image_pil(input_path, output_path, 'JPEG')
-
+                                    
+                                    elif state == "convert_txt_docx" and filename.lower().endswith('.txt'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".docx")
+                                        result = convert_txt_to_docx(input_path, output_path)
+                                    
+                                    elif state == "convert_docx_pdf" and filename.lower().endswith('.docx'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".pdf")
+                                        result = convert_docx_to_pdf(input_path, output_path)
+                                    
+                                    elif state == "convert_gif_mp4" and filename.lower().endswith('.gif'):
+                                        print(f"Обработка GIF файла: {filename}")
+                                        output_path = os.path.join(tmp_dir, base_name + ".mp4")
+                                        result = convert_gif_to_mp4(input_path, output_path)
+                                        print(f"Результат конвертации GIF: {result}")
+                                    
+                                    elif state == "convert_webp_png" and filename.lower().endswith('.webp'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".png")
+                                        result = convert_webp_to_png(input_path, output_path)
+                                    
+                                    elif state == "convert_webp_jpg" and filename.lower().endswith('.webp'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                        result = convert_webp_to_jpg(input_path, output_path)
+                                    
+                                    elif state == "convert_pdf_jpg" and filename.lower().endswith('.pdf'):
+                                        output_path = os.path.join(tmp_dir, base_name + ".jpg")
+                                        result = convert_pdf_to_jpg(input_path, output_path)
+                                    
                                     if result:
                                         if send_document(chat_id, output_path):
                                             send_message(chat_id, "Конвертация завершена")
@@ -363,81 +480,9 @@ while True:
                                     
                                     send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
                                     user_states[chat_id] = "main"
-                                
                                 else:
                                     send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
-                    
-                    elif "document" in msg:
-                        doc = msg["document"]
-                        filename = doc.get("file_name", "file")
-                        
-                        send_message(chat_id, f"Получен файл: {filename}")
-                        
-                        with tempfile.TemporaryDirectory() as tmp_dir:
-                            input_path = os.path.join(tmp_dir, filename)
-                            
-                            if download_file(doc["file_id"], input_path):
-                                state = user_states.get(chat_id, "")
-                                base_name = os.path.splitext(filename)[0]
-                                result = False
-                                
-                                if state == "convert_txt_pdf" and filename.lower().endswith('.txt'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".pdf")
-                                    result = convert_txt_to_pdf_fpdf(input_path, output_path)
-                                
-                                elif state == "convert_jpg_png" and filename.lower().endswith(('.jpg', '.jpeg')):
-                                    output_path = os.path.join(tmp_dir, base_name + ".png")
-                                    result = convert_image_pil(input_path, output_path, 'PNG')
-                                
-                                elif state == "convert_docx_txt" and filename.lower().endswith('.docx'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".txt")
-                                    result = convert_docx_to_txt_python_docx(input_path, output_path)
-                                
-                                elif state == "convert_png_jpg" and filename.lower().endswith('.png'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    result = convert_image_pil(input_path, output_path, 'JPEG')
-
-                                elif state == "convert_txt_docx" and filename.lower().endswith('.txt'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".docx")
-                                    result = convert_txt_to_docx(input_path, output_path)
-                                
-                                elif state == "convert_docx_pdf" and filename.lower().endswith('.docx'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".pdf")
-                                    result = convert_docx_to_pdf(input_path, output_path)
-                                
-                                elif state == "convert_gif_mp4" and filename.lower().endswith('.gif'):
-                                    print(f"Обработка GIF файла: {filename}")
-                                    print(f"Размер файла: {os.path.getsize(input_path)} байт")
-                                    output_path = os.path.join(tmp_dir, base_name + ".mp4")
-                                    result = convert_gif_to_mp4(input_path, output_path)
-                                    print(f"Результат конвертации GIF: {result}")
-                                
-                                elif state == "convert_webp_png" and filename.lower().endswith('.webp'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".png")
-                                    result = convert_webp_to_png(input_path, output_path)
-                                
-                                elif state == "convert_webp_jpg" and filename.lower().endswith('.webp'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    result = convert_webp_to_jpg(input_path, output_path)
-                                
-                                elif state == "convert_pdf_jpg" and filename.lower().endswith('.pdf'):
-                                    output_path = os.path.join(tmp_dir, base_name + ".jpg")
-                                    result = convert_pdf_to_jpg(input_path, output_path)
-                                
-                                if result:
-                                    if send_document(chat_id, output_path):
-                                        send_message(chat_id, "Конвертация завершена")
-                                    else:
-                                        send_message(chat_id, "Ошибка отправки файла")
-                                else:
-                                    send_message(chat_id, "Ошибка конвертации")
-                                
-                                send_message(chat_id, "Выберите следующий тип конвертации:", get_conversion_keyboard())
-                                user_states[chat_id] = "main"
-
-                            else:
-                                send_message(chat_id, "Ошибка загрузки", get_conversion_keyboard())
         
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        time.sleep(5)
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            time.sleep(5)
