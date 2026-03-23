@@ -322,7 +322,7 @@ def send_photo(chat_id, photo_path):
     except:
         return False
 
-print("Бот запущен...")
+print("ДА")
 last_id = 0
 user_states = {}
 
